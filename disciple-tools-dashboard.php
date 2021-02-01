@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name: Disciple Tools - Multiplier Dashboard Plugin
- * Plugin URI: https://github.com/DiscipleTools/disciple-tools-dashboard-plugin
- * The multiplier dashboard upgrades the multipliers experience as soon as they log into the system.
- * Version:  0.1.0
+ * Plugin Name: Disciple Tools - Dashboard
+ * Plugin URI: https://github.com/DiscipleTools/disciple-tools-dashboard
+ * Description: The multiplier dashboard upgrades the multipliers experience as soon as they log into the system giving them a landing page with stats.
+ * Version:  0.2
  * Author URI: https://github.com/DiscipleTools
  * GitHub Plugin URI: https://github.com/DiscipleTools/disciple-tools-dashboard-plugin
  * Requires at least: 4.7.0
  * (Requires 4.7+ because of the integration of the REST API at 4.7 and the security requirements of this milestone version.)
- * Tested up to: 4.9
+ * Tested up to: 5.6
  *
  * @package Disciple_Tools
  * @link    https://github.com/DiscipleTools
@@ -20,7 +20,7 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit; // Exit if accessed directly
 }
-$dt_dashboard_required_dt_theme_version = '0.19.0';
+$dt_dashboard_required_dt_theme_version = '1.0.0';
 
 /**
  * Gets the instance of the `DT_Dashboard_Plugin` class.
@@ -29,7 +29,7 @@ $dt_dashboard_required_dt_theme_version = '0.19.0';
  * @access public
  * @return object|bool
  */
-function dt_dashboard_plugin() {
+add_action( 'after_setup_theme', function() {
     global $dt_dashboard_required_dt_theme_version;
     $wp_theme = wp_get_theme();
     $version = $wp_theme->version;
@@ -37,12 +37,13 @@ function dt_dashboard_plugin() {
      * Check if the Disciple.Tools theme is loaded and is the latest required version
      */
     $is_theme_dt = strpos( $wp_theme->get_template(), "disciple-tools-theme" ) !== false || $wp_theme->name === "Disciple Tools";
-    if ( $is_theme_dt && version_compare( $version, $dt_dashboard_required_dt_theme_version, "<" ) ) {
-        add_action( 'admin_notices', 'dt_dashboard_plugin_hook_admin_notice' );
-        add_action( 'wp_ajax_dismissed_notice_handler', 'dt_hook_ajax_notice_handler' );
-        return false;
-    }
-    if ( !$is_theme_dt ){
+
+    if ( !$is_theme_dt || version_compare( $version, $dt_dashboard_required_dt_theme_version, "<" ) ) {
+        if ( ! is_multisite() ) {
+            add_action( 'admin_notices', 'dt_dashboard_plugin_hook_admin_notice' );
+            add_action( 'wp_ajax_dismissed_notice_handler', 'dt_hook_ajax_notice_handler' );
+        }
+
         return false;
     }
     /**
@@ -58,8 +59,9 @@ function dt_dashboard_plugin() {
     if ( !$is_rest || strpos( dt_get_url_path(), 'dashboard' ) !== false ){
         return DT_Dashboard_Plugin::get_instance();
     }
-}
-add_action( 'plugins_loaded', 'dt_dashboard_plugin' );
+
+    return false;
+}, 50 );
 
 /**
  * Singleton class for setting up the plugin.
@@ -121,7 +123,13 @@ class DT_Dashboard_Plugin {
      * @return void
      */
     private function includes() {
-        require_once( 'includes/admin/admin-menu-and-tabs.php' );
+
+        require_once( 'includes/rest-api.php' );
+        DT_Dashboard_Plugin_Endpoints::instance();
+
+
+        require_once( 'includes/functions.php' );
+        DT_Dashboard_Plugin_Functions::instance();
     }
 
     /**
@@ -137,21 +145,11 @@ class DT_Dashboard_Plugin {
         $this->dir_path     = trailingslashit( plugin_dir_path( __FILE__ ) );
         $this->dir_uri      = trailingslashit( plugin_dir_url( __FILE__ ) );
 
-        // Plugin directory paths.
-        $this->includes_path      = trailingslashit( $this->dir_path . 'includes' );
-
-        // Plugin directory URIs.
-        $this->img_uri      = trailingslashit( $this->dir_uri . 'img' );
 
         // Admin and settings variables
         $this->token             = 'dt_dashboard_plugin';
-        $this->version             = '0.1';
+        $this->version             = '0.2';
 
-        // sample rest api class
-        require_once( 'includes/rest-api.php' );
-        DT_Dashboard_Plugin_Endpoints::instance();
-        require_once( 'includes/functions.php' );
-        DT_Dashboard_Plugin_Functions::instance();
     }
 
     /**
@@ -168,24 +166,17 @@ class DT_Dashboard_Plugin {
             if ( ! class_exists( 'Puc_v4_Factory' ) ) {
                 require( get_template_directory() . '/dt-core/libraries/plugin-update-checker/plugin-update-checker.php' );
             }
-            /**
-             * Below is the publicly hosted .json file that carries the version information. This file can be hosted
-             * anywhere as long as it is publicly accessible. You can download the version file listed below and use it as
-             * a template.
-             * Also, see the instructions for version updating to understand the steps involved.
-             * @see https://github.com/DiscipleTools/disciple-tools-version-control/wiki/How-to-Update-the-Dashboard-Plugin
-             */
-//            @todo enable this section with your own hosted file
-//            $hosted_json = "https://raw.githubusercontent.com/DiscipleTools/disciple-tools-version-control/master/disciple-tools-dashboard-plugin-version-control.json";
-//            Puc_v4_Factory::buildUpdateChecker(
-//                $hosted_json,
-//                __FILE__,
-//                'disciple-tools-dashboard-plugin'
-//            );
+
+            $hosted_json = "https://raw.githubusercontent.com/DiscipleTools/disciple-tools-version-control/master/disciple-tools-dashboard-version-control.json";
+            Puc_v4_Factory::buildUpdateChecker(
+                $hosted_json,
+                __FILE__,
+                'disciple-tools-dashboard'
+            );
         }
 
         // Internationalize the text strings used.
-        add_action( 'plugins_loaded', array( $this, 'i18n' ), 2 );
+        add_action( 'after_setup_theme', array( $this, 'i18n' ), 51 );
     }
 
     /**
@@ -225,7 +216,19 @@ class DT_Dashboard_Plugin {
      * @return void
      */
     public function i18n() {
-        load_plugin_textdomain( 'dt_dashboard_plugin', false, trailingslashit( dirname( plugin_basename( __FILE__ ) ) ). 'languages' );
+        $domain = 'disciple-tools-dashboard';
+        $locale = apply_filters(
+            'plugin_locale',
+            ( is_admin() && function_exists( 'get_user_locale' ) ) ? get_user_locale() : get_locale(),
+            $domain
+        );
+
+        $mo_file = $domain . '-' . $locale . '.mo';
+        $path = realpath( dirname( __FILE__ ) . '/languages' );
+
+        if ($path && file_exists( $path )) {
+            load_textdomain( $domain, $path . '/' . $mo_file );
+        }
     }
 
     /**
@@ -236,7 +239,7 @@ class DT_Dashboard_Plugin {
      * @return string
      */
     public function __toString() {
-        return 'dt_dashboard_plugin';
+        return 'disciple-tools-dashboard';
     }
 
     /**
@@ -247,7 +250,7 @@ class DT_Dashboard_Plugin {
      * @return void
      */
     public function __clone() {
-        _doing_it_wrong( __FUNCTION__, esc_html__( 'Whoah, partner!', 'dt_dashboard_plugin' ), '0.1' );
+        _doing_it_wrong( __FUNCTION__, esc_html__( 'Whoah, partner!', 'disciple-tools-dashboard' ), '0.1' );
     }
 
     /**
@@ -258,7 +261,7 @@ class DT_Dashboard_Plugin {
      * @return void
      */
     public function __wakeup() {
-        _doing_it_wrong( __FUNCTION__, esc_html__( 'Whoah, partner!', 'dt_dashboard_plugin' ), '0.1' );
+        _doing_it_wrong( __FUNCTION__, esc_html__( 'Whoah, partner!', 'disciple-tools-dashboard' ), '0.1' );
     }
 
     /**
@@ -270,7 +273,7 @@ class DT_Dashboard_Plugin {
      */
     public function __call( $method = '', $args = array() ) {
         // @codingStandardsIgnoreLine
-        _doing_it_wrong( "dt_dashboard_plugin::{$method}", esc_html__( 'Method does not exist.', 'dt_dashboard_plugin' ), '0.1' );
+        _doing_it_wrong( "dt_dashboard_plugin::{$method}", esc_html__( 'Method does not exist.', 'disciple-tools-dashboard' ), '0.1' );
         unset( $method, $args );
         return null;
     }
@@ -285,9 +288,9 @@ function dt_dashboard_plugin_hook_admin_notice() {
     global $dt_dashboard_required_dt_theme_version;
     $wp_theme = wp_get_theme();
     $current_version = $wp_theme->version;
-    $message = __( "'Disciple Tools - Dashboard Plugin' plugin requires 'Disciple Tools' theme to work. Please activate 'Disciple Tools' theme or make sure it is latest version.", "dt_dashboard_plugin" );
+    $message = "'Disciple Tools - Dashboard' plugin requires 'Disciple Tools' theme to work. Please activate 'Disciple Tools' theme or make sure it is latest version.";
     if ( $wp_theme->get_template() === "disciple-tools-theme" ){
-        $message .= sprintf( esc_html__( 'Current Disciple Tools version: %1$s, required version: %2$s', 'dt_dashboard_plugin' ), esc_html( $current_version ), esc_html( $dt_dashboard_required_dt_theme_version ) );
+        $message .= ' ' . sprintf( esc_html( 'Current Disciple Tools version: %1$s, required version: %2$s' ), esc_html( $current_version ), esc_html( $dt_dashboard_required_dt_theme_version ) );
     }
     // Check if it's been dismissed...
     if ( ! get_option( 'dismissed-dt-dashboard', false ) ) { ?>
